@@ -23,8 +23,11 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
 .gridline{stroke:#ece7df;stroke-width:.8;stroke-dasharray:4 4}
 .ref{fill:none;stroke:#cfc9bf;stroke-width:4;stroke-linecap:round;stroke-linejoin:round;opacity:0}
 .ref.show{opacity:.45}
+.ref.accepted{opacity:1;stroke:#111}
 .userStroke{fill:none;stroke:#111;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
 .userStroke.bad{stroke:var(--bad)}.userStroke.ok{stroke:var(--ok)}
+.snapStroke{fill:none;stroke:var(--ok);stroke-width:4;stroke-linecap:round;stroke-linejoin:round;opacity:1;transition:opacity .22s ease}
+.snapStroke.fade{opacity:0}
 .status{text-align:center;min-height:48px;padding-top:12px;font-size:15px}.good{color:var(--ok)}.badText{color:var(--bad)}
 .progress{text-align:center;color:var(--muted);font-size:14px;margin-bottom:12px}
 .note{margin-top:14px;color:var(--muted);font-size:13px;line-height:1.45}
@@ -72,7 +75,7 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
     </div>
 
     <div class="note">
-      В этой версии сами траектории больше не зашиты в код для одного 家: приложение загружает SVG выбранного кандзи из KanjiVG и извлекает из него черты в правильном порядке. Проверка остаётся более строгой: учитываются начало, конец, направление, длина, форма и положение всей черты.
+      В этой версии сами траектории больше не зашиты в код для одного 家: приложение загружает SVG выбранного кандзи из KanjiVG и извлекает из него черты в правильном порядке. Проверка учитывает начало, конец, направление, длину, форму и положение всей черты. После успешной проверки пользовательская зелёная линия плавно заменяется точной эталонной чертой KanjiVG, поэтому погрешности не накапливаются.
     </div>
   </div>
 </div>
@@ -212,19 +215,41 @@ function addPath(points,cls='userStroke'){
 }
 function update(){
   progress.textContent=`${accepted.length} / ${refs.length}`;
-  refs.forEach((p,i)=>p.classList.toggle('show',mode==='learn'||(mode==='repeat'&&i===accepted.length)));
+  refs.forEach((p,i)=>{
+    p.classList.remove('show','accepted');
+    if(i < accepted.length){
+      p.classList.add('accepted');
+    }else if(mode==='learn' || (mode==='repeat' && i===accepted.length)){
+      p.classList.add('show');
+    }
+  });
   if(refs.length&&accepted.length===refs.length)status.innerHTML=`<span class="good">✓ ${KANJI[currentIndex].k} написан полностью.</span>`;
   else if(refs.length)status.textContent=`Сейчас ожидается черта ${accepted.length+1} из ${refs.length}.`;
 }
 function clearAll(){accepted=[];current=[];drawn.innerHTML='';update()}
-function undo(){if(!accepted.length)return;accepted.pop();if(drawn.lastElementChild)drawn.lastElementChild.remove();update()}
+function undo(){if(!accepted.length)return;accepted.pop();update()}
 function flashHint(){if(accepted.length>=refs.length)return;const p=refs[accepted.length];p.classList.add('show');setTimeout(()=>{if(mode==='test')p.classList.remove('show')},900)}
 function evaluateFinishedStroke(){
   if(!refs.length||accepted.length>=refs.length)return;
   const temp=document.getElementById('tempStroke');if(temp)temp.remove();
   const result=evaluate(current,refs[accepted.length]);
   if(result.ok){
-    addPath(current,'userStroke ok');accepted.push(current.slice());status.innerHTML='<span class="good">✓ Черта засчитана</span>';setTimeout(update,320)
+    const userPath=addPath(current,'snapStroke');
+    const acceptedIndex=accepted.length;
+    accepted.push(current.slice());
+    status.innerHTML='<span class="good">✓ Черта засчитана</span>';
+
+    // Зафиксированная черта всегда становится точной эталонной чертой KanjiVG.
+    // Небольшая задержка позволяет увидеть собственную зелёную линию,
+    // затем она мягко исчезает, а шаблонная линия остаётся на её месте.
+    setTimeout(()=>{
+      userPath.classList.add('fade');
+      refs[acceptedIndex]?.classList.add('accepted');
+    },90);
+    setTimeout(()=>{
+      userPath.remove();
+      update();
+    },330);
   }else{
     const bad=addPath(current,'userStroke bad');status.innerHTML=`<span class="badText">Не засчитано: ${result.reason}</span>`;
     refs[accepted.length].classList.add('show');
