@@ -94,7 +94,7 @@ button:disabled{opacity:.45;cursor:default}
     </div>
 
     <div class="note">
-      Это proof of concept: приложение уже различает отдельные движения, знает ожидаемую черту и оценивает начало, конец, направление и близость траектории. Допуски специально мягкие — письмо пальцем не должно требовать каллиграфической точности.
+      Это proof of concept: приложение уже различает отдельные движения, знает ожидаемую черту и оценивает начало, конец, направление и близость траектории. Проверка учитывает начало, конец, направление, форму, длину и положение всей черты. Допуск остаётся достаточным для письма пальцем, но смещённые черты больше не должны засчитываться.
     </div>
   </div>
 </div>
@@ -152,22 +152,69 @@ function sampleRef(path,n=36){
   }
   return out;
 }
+function pathLength(points){
+  let total=0;
+  for(let i=1;i<points.length;i++){
+    total += Math.hypot(points[i].x-points[i-1].x, points[i].y-points[i-1].y);
+  }
+  return total;
+}
+function centerOf(points){
+  let x=0,y=0;
+  for(const p of points){ x+=p.x; y+=p.y; }
+  return {x:x/points.length,y:y/points.length};
+}
 function evaluate(points, ref){
   if(points.length<3) return {ok:false, reason:'Слишком короткая черта'};
-  const u=resampleUser(points,36), r=sampleRef(ref,36);
+
+  const u=resampleUser(points,40), r=sampleRef(ref,40);
   const start=Math.hypot(u[0].x-r[0].x,u[0].y-r[0].y);
   const end=Math.hypot(u.at(-1).x-r.at(-1).x,u.at(-1).y-r.at(-1).y);
-  let avg=0;
-  for(let i=0;i<u.length;i++) avg += Math.hypot(u[i].x-r[i].x,u[i].y-r[i].y);
+
+  let avg=0, maxDev=0;
+  for(let i=0;i<u.length;i++){
+    const d=Math.hypot(u[i].x-r[i].x,u[i].y-r[i].y);
+    avg += d;
+    maxDev = Math.max(maxDev,d);
+  }
   avg/=u.length;
 
-  // Мягкие пороги для пальца.
-  const ok = start < 18 && end < 22 && avg < 17;
+  const uc=centerOf(u), rc=centerOf(r);
+  const centerDist=Math.hypot(uc.x-rc.x, uc.y-rc.y);
+
+  const userLen=pathLength(u);
+  const refLen=pathLength(r);
+  const lenRatio = refLen ? userLen/refLen : 1;
+
+  // Проверка общего направления от начала к концу.
+  const uv={x:u.at(-1).x-u[0].x, y:u.at(-1).y-u[0].y};
+  const rv={x:r.at(-1).x-r[0].x, y:r.at(-1).y-r[0].y};
+  const ul=Math.hypot(uv.x,uv.y), rl=Math.hypot(rv.x,rv.y);
+  const dirCos=(ul>1 && rl>1) ? (uv.x*rv.x+uv.y*rv.y)/(ul*rl) : 1;
+
+  // Строже прежней версии: оцениваем не только начало/конец и среднюю
+  // близость, но и максимальное отклонение, положение всей черты,
+  // длину и направление.
+  const ok =
+    start < 11 &&
+    end < 13 &&
+    avg < 9.5 &&
+    maxDev < 17 &&
+    centerDist < 9 &&
+    lenRatio > 0.58 &&
+    lenRatio < 1.55 &&
+    dirCos > 0.45;
+
   let reason='';
-  if(start>=18) reason='Начни ближе к правильной точке';
-  else if(end>=22) reason='Направление или конец черты отличаются';
-  else if(avg>=17) reason='Траектория слишком далеко от эталона';
-  return {ok, start, end, avg, reason};
+  if(start>=11) reason='Начало черты слишком далеко от правильного места';
+  else if(end>=13) reason='Конец черты слишком далеко от правильного места';
+  else if(dirCos<=0.45) reason='Неверное направление черты';
+  else if(centerDist>=9) reason='Черта смещена относительно кандзи';
+  else if(lenRatio<=0.58 || lenRatio>=1.55) reason='Длина черты сильно отличается от эталона';
+  else if(maxDev>=17) reason='Часть черты слишком далеко отклонилась от эталона';
+  else if(avg>=9.5) reason='Форма или положение черты слишком неточны';
+
+  return {ok, start, end, avg, maxDev, centerDist, lenRatio, dirCos, reason};
 }
 function addPath(points, cls='userStroke'){
   const p=document.createElementNS('http://www.w3.org/2000/svg','path');
