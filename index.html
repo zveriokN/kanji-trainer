@@ -32,7 +32,7 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
 .ref.accepted{opacity:1;stroke:#111}
 .userStroke{fill:none;stroke:#111;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}
 .userStroke.bad{stroke:var(--bad)}.userStroke.ok{stroke:var(--ok)}
-.snapStroke{fill:none;stroke:var(--ok);stroke-width:4;stroke-linecap:round;stroke-linejoin:round;opacity:1;transition:opacity .22s ease}
+.snapStroke{fill:none;stroke:var(--ok);stroke-width:4;stroke-linecap:round;stroke-linejoin:round;opacity:1;transition:opacity .10s ease}
 .snapStroke.fade{opacity:0}
 .status{text-align:center;min-height:48px;padding-top:12px;font-size:15px}.good{color:var(--ok)}.badText{color:var(--bad)}
 .progress{text-align:center;color:var(--muted);font-size:14px;margin-bottom:12px}
@@ -522,7 +522,7 @@ function evaluateFinishedStroke(){
     setTimeout(()=>{
       userPath.classList.add('fade');
       refs[acceptedIndex]?.classList.add('accepted');
-    },90);
+    },35);
     setTimeout(()=>{
       userPath.remove();
       update();
@@ -532,7 +532,7 @@ function evaluateFinishedStroke(){
           autoAdvanceTimer=setTimeout(()=>loadNextAuto(),1000);
         }
       }
-    },330);
+    },140);
   }else{
     if(mode==='test'){
       attemptErrors++;
