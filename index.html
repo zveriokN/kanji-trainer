@@ -37,6 +37,8 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
 .status{text-align:center;min-height:48px;padding-top:12px;font-size:15px}.good{color:var(--ok)}.badText{color:var(--bad)}
 .progress{text-align:center;color:var(--muted);font-size:14px;margin-bottom:12px}
 .note{margin-top:14px;color:var(--muted);font-size:13px;line-height:1.45}
+.backupbar{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:14px}
+.fileInput{display:none}
 .loading{opacity:.55}
 </style>
 </head>
@@ -88,6 +90,12 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
         <button id="prevBtn">← Предыдущий</button>
         <button id="nextBtn">Следующий →</button>
       </span>
+    </div>
+
+    <div class="backupbar">
+      <button id="exportBtn">Экспорт прогресса</button>
+      <button id="importBtn">Импорт прогресса</button>
+      <input id="importFile" class="fileInput" type="file" accept="application/json,.json">
     </div>
 
     <div class="note">
@@ -215,6 +223,9 @@ const manualNav=document.getElementById('manualNav');
 const autoNextBtn=document.getElementById('autoNextBtn');
 const sessionStats=document.getElementById('sessionStats');
 const hintBtn=document.getElementById('hintBtn');
+const exportBtn=document.getElementById('exportBtn');
+const importBtn=document.getElementById('importBtn');
+const importFile=document.getElementById('importFile');
 
 let refs=[], mode='test', accepted=[], current=[], drawing=false, pointerId=null, currentIndex=0;
 let trainingMode='auto';
@@ -236,6 +247,48 @@ function loadProgress(){
 function saveProgress(){
   try{ localStorage.setItem(PROGRESS_KEY, JSON.stringify(learningProgress)); }catch(e){}
 }
+
+function exportProgress(){
+  const payload={
+    app:'Kanji Trainer',
+    version:1,
+    exportedAt:new Date().toISOString(),
+    progress:learningProgress
+  };
+  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  const d=new Date();
+  const stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  a.href=url;
+  a.download=`kanji-trainer-progress-${stamp}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),500);
+}
+
+function importProgress(file){
+  const reader=new FileReader();
+  reader.onload=()=>{
+    try{
+      const parsed=JSON.parse(reader.result);
+      const incoming=parsed?.progress ?? parsed;
+      if(!incoming || typeof incoming!=='object' || Array.isArray(incoming)){
+        throw new Error('Неверный формат файла');
+      }
+      learningProgress=incoming;
+      saveProgress();
+      alert('Прогресс восстановлен.');
+    }catch(e){
+      alert('Не удалось импортировать прогресс: '+e.message);
+    }finally{
+      importFile.value='';
+    }
+  };
+  reader.readAsText(file);
+}
+
 function getStat(k){
   if(!learningProgress[k]){
     learningProgress[k]={
@@ -600,6 +653,14 @@ Object.entries(modeButtons).forEach(([m,b])=>b.onclick=()=>{
   b.classList.add('active');
   clearTimeout(guideTimer); guide.innerHTML='';
   clearAll(); update();
+});
+
+
+exportBtn.onclick=exportProgress;
+importBtn.onclick=()=>importFile.click();
+importFile.addEventListener('change',()=>{
+  const file=importFile.files?.[0];
+  if(file) importProgress(file);
 });
 
 (async()=>{
