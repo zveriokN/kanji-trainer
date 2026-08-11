@@ -75,21 +75,95 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
     </div>
 
     <div class="note">
-      В этой версии сами траектории больше не зашиты в код для одного 家: приложение загружает SVG выбранного кандзи из KanjiVG и извлекает из него черты в правильном порядке. Проверка учитывает начало, конец, направление, длину, форму и положение всей черты. После успешной проверки пользовательская зелёная линия плавно заменяется точной эталонной чертой KanjiVG, поэтому погрешности не накапливаются.
+      Кандзи, значения и чтения загружаются из нашей Google-таблицы. Траектории письма приложение автоматически получает из KanjiVG. После успешной проверки зелёная пользовательская линия заменяется точной эталонной чертой, поэтому погрешности не накапливаются.
     </div>
   </div>
 </div>
 
 <script>
-const KANJI = [
-  {k:'家', meaning:'дом', on:'カ', kun:'いえ・うち'},
-  {k:'日', meaning:'день; солнце', on:'ニチ・ジツ', kun:'ひ・か'},
-  {k:'月', meaning:'месяц; луна', on:'ゲツ・ガツ', kun:'つき'},
-  {k:'木', meaning:'дерево', on:'モク・ボク', kun:'き'},
-  {k:'親', meaning:'родитель; близкий', on:'シン', kun:'おや・したしい'},
-  {k:'転', meaning:'вращаться; перемещаться', on:'テン', kun:'ころがる・ころぶ'},
-  {k:'調', meaning:'исследовать; настраивать', on:'チョウ', kun:'しらべる・ととのう'}
-];
+const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQr2je_6ZgRhd1J5HMRtz0NU_pnQSV0W0p2dm4zkiwgYU_2GQ-CF1D6WfE5mHknneamfpDSg2w6j8ic/pub?gid=743630087&single=true&output=csv';
+let KANJI = [];
+
+function parseCSV(text){
+  text = text.replace(/^\uFEFF/, '');
+  const rows=[];
+  let row=[], field='', quoted=false;
+
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(quoted){
+      if(ch==='"'){
+        if(text[i+1]==='"'){ field+='"'; i++; }
+        else quoted=false;
+      }else field+=ch;
+    }else{
+      if(ch==='"') quoted=true;
+      else if(ch===','){ row.push(field); field=''; }
+      else if(ch==='\n'){ row.push(field); rows.push(row); row=[]; field=''; }
+      else if(ch!=='\r') field+=ch;
+    }
+  }
+  row.push(field);
+  if(row.length>1 || row[0]!=='' ) rows.push(row);
+  return rows;
+}
+
+function normHeader(s){
+  return String(s||'').trim().toLowerCase().replace(/\s+/g,'');
+}
+
+function isActiveValue(v){
+  const s=String(v??'').trim().toLowerCase();
+  return !['нет','no','false','0','off','неактивно','inactive','×','✗'].includes(s);
+}
+
+async function loadSheetData(){
+  status.textContent='Загружаю базу кандзи из Google Sheets…';
+  pad.classList.add('loading');
+
+  const res=await fetch(SHEET_CSV_URL, {cache:'no-store'});
+  if(!res.ok) throw new Error(`Google Sheets: HTTP ${res.status}`);
+
+  const text=await res.text();
+  const rows=parseCSV(text);
+  if(rows.length<2) throw new Error('В таблице нет строк с кандзи');
+
+  const headers=rows[0].map(normHeader);
+  const findCol=(variants)=>headers.findIndex(h=>variants.includes(h));
+
+  const cKanji=findCol(['kanji','кандзи']);
+  const cMeaning=findCol(['значение','meaning','перевод']);
+  const cOn=findCol(['音読み','onyomi','on']);
+  const cKun=findCol(['訓読み','kunyomi','kun']);
+  const cActive=findCol(['активно','active']);
+
+  if(cKanji<0) throw new Error('Не найден столбец Kanji');
+
+  const seen=new Set();
+  KANJI = rows.slice(1).map(r=>({
+    k:String(r[cKanji]??'').trim(),
+    meaning:cMeaning>=0 ? String(r[cMeaning]??'').trim() : '',
+    on:cOn>=0 ? String(r[cOn]??'').trim() : '',
+    kun:cKun>=0 ? String(r[cKun]??'').trim() : '',
+    active:cActive>=0 ? isActiveValue(r[cActive]) : true
+  })).filter(x=>{
+    if(!x.k || !x.active || seen.has(x.k)) return false;
+    seen.add(x.k);
+    return true;
+  });
+
+  if(!KANJI.length) throw new Error('В таблице нет активных кандзи');
+
+  select.innerHTML='';
+  KANJI.forEach((x,i)=>{
+    const o=document.createElement('option');
+    o.value=i;
+    o.textContent=x.meaning ? `${x.k} — ${x.meaning}` : x.k;
+    select.appendChild(o);
+  });
+
+  pad.classList.remove('loading');
+}
 
 const select=document.getElementById('kanjiSelect');
 const meaning=document.getElementById('meaning');
@@ -103,11 +177,6 @@ const progress=document.getElementById('progress');
 
 let refs=[], mode='test', accepted=[], current=[], drawing=false, pointerId=null, currentIndex=0;
 
-KANJI.forEach((x,i)=>{
-  const o=document.createElement('option');
-  o.value=i; o.textContent=`${x.k} — ${x.meaning}`;
-  select.appendChild(o);
-});
 
 function hexFile(ch){
   return ch.codePointAt(0).toString(16).padStart(5,'0').toLowerCase()+'.svg';
@@ -117,7 +186,7 @@ async function loadKanji(i){
   select.value=currentIndex;
   const item=KANJI[currentIndex];
   meaning.textContent=item.meaning;
-  readings.textContent=`${item.k}　${item.on}　／　${item.kun}`;
+  readings.textContent=`${item.k}　${item.on || '—'}　／　${item.kun || '—'}`;
   status.textContent=`Загружаю ${item.k}…`;
   pad.classList.add('loading');
   accepted=[]; current=[]; drawn.innerHTML=''; refsGroup.innerHTML=''; refs=[]; update();
@@ -298,7 +367,18 @@ select.onchange=()=>loadKanji(+select.value);
 const modeButtons={learn:document.getElementById('learnBtn'),repeat:document.getElementById('repeatBtn'),test:document.getElementById('testBtn')};
 Object.entries(modeButtons).forEach(([m,b])=>b.onclick=()=>{mode=m;Object.values(modeButtons).forEach(x=>x.classList.remove('active'));b.classList.add('active');update()});
 
-loadKanji(0);
+(async()=>{
+  try{
+    await loadSheetData();
+    await loadKanji(0);
+    document.querySelector('.sub').textContent=`Загружено активных кандзи: ${KANJI.length}`;
+  }catch(err){
+    console.error(err);
+    pad.classList.remove('loading');
+    status.innerHTML=`<span class="badText">Не удалось загрузить базу: ${err.message}</span>`;
+    document.querySelector('.sub').textContent='Ошибка загрузки Google Sheets';
+  }
+})();
 </script>
 </body>
 </html>
