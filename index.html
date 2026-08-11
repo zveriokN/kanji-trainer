@@ -37,22 +37,6 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
 .status{text-align:center;min-height:48px;padding-top:12px;font-size:15px}.good{color:var(--ok)}.badText{color:var(--bad)}
 .progress{text-align:center;color:var(--muted);font-size:14px;margin-bottom:12px}
 .note{margin-top:14px;color:var(--muted);font-size:13px;line-height:1.45}
-.toolsbar{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:14px}
-.modalBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.28);display:flex;align-items:center;justify-content:center;padding:18px;z-index:50}
-.modalBackdrop.hidden{display:none}
-.modalCard{width:min(92vw,520px);max-height:82vh;overflow:auto;background:#fff;border-radius:20px;padding:18px;border:1px solid var(--line);box-shadow:0 20px 60px rgba(0,0,0,.18)}
-.modalHead{display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
-.modalHead h2{font-size:20px;margin:0}
-.statGrid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin:12px 0}
-.statBox{border:1px solid var(--line);border-radius:14px;padding:12px}
-.statNum{font-size:24px;font-weight:700}
-.statLabel{font-size:12px;color:var(--muted);margin-top:3px}
-.statSection{margin-top:14px}
-.statSection h3{font-size:15px;margin:0 0 8px}
-.smallList{display:flex;flex-direction:column;gap:6px}
-.smallRow{display:flex;justify-content:space-between;gap:10px;font-size:14px;padding:7px 0;border-bottom:1px solid #eee}
-.fileInput{display:none}
-
 .loading{opacity:.55}
 </style>
 </head>
@@ -104,13 +88,6 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
         <button id="prevBtn">← Предыдущий</button>
         <button id="nextBtn">Следующий →</button>
       </span>
-    </div>
-
-    <div class="toolsbar">
-      <button id="statsBtn">Статистика</button>
-      <button id="exportBtn">Экспорт прогресса</button>
-      <button id="importBtn">Импорт прогресса</button>
-      <input id="importFile" class="fileInput" type="file" accept="application/json,.json">
     </div>
 
     <div class="note">
@@ -238,12 +215,6 @@ const manualNav=document.getElementById('manualNav');
 const autoNextBtn=document.getElementById('autoNextBtn');
 const sessionStats=document.getElementById('sessionStats');
 const hintBtn=document.getElementById('hintBtn');
-const statsBtn=document.getElementById('statsBtn');
-const exportBtn=document.getElementById('exportBtn');
-const importBtn=document.getElementById('importBtn');
-const importFile=document.getElementById('importFile');
-const statsModal=document.getElementById('statsModal');
-const closeStatsBtn=document.getElementById('closeStatsBtn');
 
 let refs=[], mode='test', accepted=[], current=[], drawing=false, pointerId=null, currentIndex=0;
 let trainingMode='auto';
@@ -265,84 +236,6 @@ function loadProgress(){
 function saveProgress(){
   try{ localStorage.setItem(PROGRESS_KEY, JSON.stringify(learningProgress)); }catch(e){}
 }
-
-function downloadProgressBackup(){
-  const payload={app:'Kanji Trainer',version:1,exportedAt:new Date().toISOString(),progress:learningProgress};
-  const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  const d=new Date();
-  const stamp=`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-  a.href=url;
-  a.download=`kanji-trainer-progress-${stamp}.json`;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(()=>URL.revokeObjectURL(url),500);
-}
-
-function importProgressBackup(file){
-  const reader=new FileReader();
-  reader.onload=()=>{
-    try{
-      const data=JSON.parse(reader.result);
-      const incoming=data?.progress ?? data;
-      if(!incoming || typeof incoming!=='object' || Array.isArray(incoming)) throw new Error('Неверный формат файла');
-      learningProgress=incoming;
-      saveProgress();
-      alert('Прогресс восстановлен.');
-      if(!statsModal.classList.contains('hidden')) renderStats();
-    }catch(e){
-      alert('Не удалось импортировать прогресс: '+e.message);
-    }finally{
-      importFile.value='';
-    }
-  };
-  reader.readAsText(file);
-}
-
-function renderStats(){
-  const now=Date.now();
-  const total=KANJI.length;
-  let seen=0,due=0,strong=0;
-  const problems=[];
-
-  for(const item of KANJI){
-    const s=learningProgress[item.k];
-    if(!s || !s.reviews) continue;
-    seen++;
-    if((s.dueAt||0)<=now) due++;
-    if((s.streak||0)>=4 && (s.difficulty||3)<=2.5) strong++;
-    const problemScore=(s.difficulty||3)+(s.errors||0)*0.18+(s.hints||0)*0.25-(s.streak||0)*0.4;
-    problems.push({k:item.k,meaning:item.meaning||'',score:problemScore,errors:s.errors||0,hints:s.hints||0});
-  }
-
-  problems.sort((a,b)=>b.score-a.score);
-  document.getElementById('statTotal').textContent=total;
-  document.getElementById('statSeen').textContent=seen;
-  document.getElementById('statDue').textContent=due;
-  document.getElementById('statStrong').textContent=strong;
-  document.getElementById('todayReviews').textContent=sessionReviews;
-  document.getElementById('todayErrors').textContent=sessionErrors;
-  document.getElementById('todayHints').textContent=sessionHints;
-
-  const list=document.getElementById('problemList');
-  list.innerHTML='';
-  const top=problems.filter(x=>x.score>3.2).slice(0,8);
-  if(!top.length){
-    list.innerHTML='<div style="color:var(--muted);font-size:14px">Пока недостаточно данных.</div>';
-  }else{
-    top.forEach(x=>{
-      const row=document.createElement('div');
-      row.className='smallRow';
-      const left=document.createElement('span');
-      left.textContent=x.meaning ? `${x.k} — ${x.meaning}` : x.k;
-      const right=document.createElement('strong');
-      right.textContent=`ош. ${x.errors} · подс. ${x.hints}`;
-      row.append(left,right);
-      list.appendChild(row);
-    });
-  }
-}
-
 function getStat(k){
   if(!learningProgress[k]){
     learningProgress[k]={
@@ -708,14 +601,6 @@ Object.entries(modeButtons).forEach(([m,b])=>b.onclick=()=>{
   clearTimeout(guideTimer); guide.innerHTML='';
   clearAll(); update();
 });
-
-
-statsBtn.onclick=()=>{ renderStats(); statsModal.classList.remove('hidden'); };
-closeStatsBtn.onclick=()=>statsModal.classList.add('hidden');
-statsModal.addEventListener('click',e=>{ if(e.target===statsModal) statsModal.classList.add('hidden'); });
-exportBtn.onclick=downloadProgressBackup;
-importBtn.onclick=()=>importFile.click();
-importFile.addEventListener('change',()=>{ const file=importFile.files?.[0]; if(file) importProgressBackup(file); });
 
 (async()=>{
   try{
