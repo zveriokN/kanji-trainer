@@ -75,38 +75,15 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
     </div>
 
     <div class="note">
-      Кандзи, значения и чтения загружаются из нашей Google-таблицы. Траектории письма приложение автоматически получает из KanjiVG. После успешной проверки зелёная пользовательская линия заменяется точной эталонной чертой, поэтому погрешности не накапливаются.
+      Кандзи, значения и чтения загружаются из нашей Google-таблицы через Google Visualization API. Траектории письма приложение автоматически получает из KanjiVG. После успешной проверки зелёная пользовательская линия заменяется точной эталонной чертой, поэтому погрешности не накапливаются.
     </div>
   </div>
 </div>
 
 <script>
-const SHEET_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQr2je_6ZgRhd1J5HMRtz0NU_pnQSV0W0p2dm4zkiwgYU_2GQ-CF1D6WfE5mHknneamfpDSg2w6j8ic/pub?gid=743630087&single=true&output=csv';
+const SHEET_ID = '1At0tlk5iAhj_a2Hl05RRZ5ewRROXZd2BKBk0Avjdxdo';
+const SHEET_GID = '743630087';
 let KANJI = [];
-
-function parseCSV(text){
-  text = text.replace(/^\uFEFF/, '');
-  const rows=[];
-  let row=[], field='', quoted=false;
-
-  for(let i=0;i<text.length;i++){
-    const ch=text[i];
-    if(quoted){
-      if(ch==='"'){
-        if(text[i+1]==='"'){ field+='"'; i++; }
-        else quoted=false;
-      }else field+=ch;
-    }else{
-      if(ch==='"') quoted=true;
-      else if(ch===','){ row.push(field); field=''; }
-      else if(ch==='\n'){ row.push(field); rows.push(row); row=[]; field=''; }
-      else if(ch!=='\r') field+=ch;
-    }
-  }
-  row.push(field);
-  if(row.length>1 || row[0]!=='' ) rows.push(row);
-  return rows;
-}
 
 function normHeader(s){
   return String(s||'').trim().toLowerCase().replace(/\s+/g,'');
@@ -117,18 +94,50 @@ function isActiveValue(v){
   return !['нет','no','false','0','off','неактивно','inactive','×','✗'].includes(s);
 }
 
+function loadGoogleTableViaJSONP(){
+  return new Promise((resolve,reject)=>{
+    const cb='kanjiSheetCallback_'+Date.now();
+    const timeout=setTimeout(()=>{
+      cleanup();
+      reject(new Error('Google Sheets не ответил'));
+    },12000);
+
+    function cleanup(){
+      clearTimeout(timeout);
+      delete window[cb];
+      script.remove();
+    }
+
+    window[cb]=(response)=>{
+      cleanup();
+      if(!response || response.status==='error'){
+        reject(new Error('Google Sheets вернул ошибку'));
+        return;
+      }
+      resolve(response.table);
+    };
+
+    const script=document.createElement('script');
+    script.onerror=()=>{
+      cleanup();
+      reject(new Error('Не удалось подключиться к Google Sheets'));
+    };
+    const tqx=encodeURIComponent(`responseHandler:${cb}`);
+    script.src=`https://docs.google.com/spreadsheets/d/${SHEET_ID}/gviz/tq?gid=${SHEET_GID}&headers=1&tqx=${tqx}`;
+    document.head.appendChild(script);
+  });
+}
+
 async function loadSheetData(){
   status.textContent='Загружаю базу кандзи из Google Sheets…';
   pad.classList.add('loading');
 
-  const res=await fetch(SHEET_CSV_URL, {cache:'no-store'});
-  if(!res.ok) throw new Error(`Google Sheets: HTTP ${res.status}`);
+  const table=await loadGoogleTableViaJSONP();
+  if(!table || !Array.isArray(table.cols) || !Array.isArray(table.rows)){
+    throw new Error('Неверный формат данных Google Sheets');
+  }
 
-  const text=await res.text();
-  const rows=parseCSV(text);
-  if(rows.length<2) throw new Error('В таблице нет строк с кандзи');
-
-  const headers=rows[0].map(normHeader);
+  const headers=table.cols.map(c=>normHeader(c.label || c.id || ''));
   const findCol=(variants)=>headers.findIndex(h=>variants.includes(h));
 
   const cKanji=findCol(['kanji','кандзи']);
@@ -139,13 +148,20 @@ async function loadSheetData(){
 
   if(cKanji<0) throw new Error('Не найден столбец Kanji');
 
+  const val=(row,idx)=>{
+    if(idx<0) return '';
+    const cell=row.c?.[idx];
+    if(!cell) return '';
+    return String(cell.f ?? cell.v ?? '').trim();
+  };
+
   const seen=new Set();
-  KANJI = rows.slice(1).map(r=>({
-    k:String(r[cKanji]??'').trim(),
-    meaning:cMeaning>=0 ? String(r[cMeaning]??'').trim() : '',
-    on:cOn>=0 ? String(r[cOn]??'').trim() : '',
-    kun:cKun>=0 ? String(r[cKun]??'').trim() : '',
-    active:cActive>=0 ? isActiveValue(r[cActive]) : true
+  KANJI = table.rows.map(row=>({
+    k:val(row,cKanji),
+    meaning:val(row,cMeaning),
+    on:val(row,cOn),
+    kun:val(row,cKun),
+    active:cActive>=0 ? isActiveValue(val(row,cActive)) : true
   })).filter(x=>{
     if(!x.k || !x.active || seen.has(x.k)) return false;
     seen.add(x.k);
@@ -158,7 +174,7 @@ async function loadSheetData(){
   KANJI.forEach((x,i)=>{
     const o=document.createElement('option');
     o.value=i;
-    o.textContent=x.meaning ? `${x.k} — ${x.meaning}` : x.k;
+    o.textContent=x.meaning ? x.meaning : 'Без значения';
     select.appendChild(o);
   });
 
@@ -186,7 +202,7 @@ async function loadKanji(i){
   select.value=currentIndex;
   const item=KANJI[currentIndex];
   meaning.textContent=item.meaning;
-  readings.textContent=`${item.k}　${item.on || '—'}　／　${item.kun || '—'}`;
+  readings.textContent=`${item.on || '—'}　／　${item.kun || '—'}`;
   status.textContent=`Загружаю ${item.k}…`;
   pad.classList.add('loading');
   accepted=[]; current=[]; drawn.innerHTML=''; refsGroup.innerHTML=''; refs=[]; update();
@@ -213,7 +229,7 @@ async function loadKanji(i){
       refsGroup.appendChild(p);
     }
     refs=[...refsGroup.querySelectorAll('.ref')];
-    status.textContent=`Напиши ${item.k}. Сейчас ожидается черта 1 из ${refs.length}.`;
+    status.textContent=`Сейчас ожидается черта 1 из ${refs.length}.`;
     update();
   }catch(err){
     console.error(err);
@@ -292,7 +308,7 @@ function update(){
       p.classList.add('show');
     }
   });
-  if(refs.length&&accepted.length===refs.length)status.innerHTML=`<span class="good">✓ ${KANJI[currentIndex].k} написан полностью.</span>`;
+  if(refs.length&&accepted.length===refs.length)status.innerHTML='<span class="good">✓ Написано правильно.</span>';
   else if(refs.length)status.textContent=`Сейчас ожидается черта ${accepted.length+1} из ${refs.length}.`;
 }
 function clearAll(){accepted=[];current=[];drawn.innerHTML='';update()}
