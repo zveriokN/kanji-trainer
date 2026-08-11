@@ -89,6 +89,7 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
     </div>
 
     <div class="nav">
+      <button id="knownBtn">Знаю хорошо ✓</button>
       <button id="autoNextBtn">Другой кандзи →</button>
       <span id="manualNav" class="hidden">
         <button id="prevBtn">← Предыдущий</button>
@@ -103,7 +104,7 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
     </div>
 
     <div class="note">
-      «Учить» — весь образец виден, а направление следующей черты показывается анимацией. «Повторять» — образец скрыт, но доступна подсказка следующей черты. «Проверка» — чистое поле; ошибки и подсказки учитываются алгоритмом автоповторения. Прогресс сохраняется в браузере этого устройства.
+      «Учить» — весь образец виден, а направление следующей черты показывается анимацией. «Повторять» — образец скрыт, но доступна подсказка следующей черты. «Проверка» — чистое поле; ошибки и подсказки учитываются алгоритмом автоповторения. Прогресс сохраняется в браузере этого устройства. «Знаю хорошо» убирает текущий кандзи из автотренировки на 30 дней.
     </div>
   </div>
 </div>
@@ -225,6 +226,7 @@ const manualTrainBtn=document.getElementById('manualTrainBtn');
 const manualPicker=document.getElementById('manualPicker');
 const manualNav=document.getElementById('manualNav');
 const autoNextBtn=document.getElementById('autoNextBtn');
+const knownBtn=document.getElementById('knownBtn');
 const sessionStats=document.getElementById('sessionStats');
 const hintBtn=document.getElementById('hintBtn');
 const exportBtn=document.getElementById('exportBtn');
@@ -356,6 +358,10 @@ function recordCompletedReview(){
   const s=getStat(k);
   const now=Date.now();
 
+  // Если 30-дневная ручная пауза закончилась и кандзи снова проверяется,
+  // дальше он возвращается в обычный алгоритм интервальных повторений.
+  if(s.knownWell && (s.dueAt||0)<=now) s.knownWell=false;
+
   s.reviews++;
   s.correct++;
   s.errors += attemptErrors;
@@ -405,6 +411,10 @@ function chooseNextAutoIndex(){
   KANJI.forEach((item,index)=>{
     if(index===currentIndex && KANJI.length>1) return;
     const s=getStat(item.k);
+
+    // "Знаю хорошо" — жёсткая пауза до назначенной даты.
+    if(s.knownWell && (s.dueAt||0)>now) return;
+
     let weight=1;
 
     if(!s.reviews){
@@ -431,6 +441,36 @@ function chooseNextAutoIndex(){
 
   return weightedChoice(candidates);
 }
+
+async function markCurrentKnownWell(){
+  if(!KANJI[currentIndex]) return;
+  clearTimeout(autoAdvanceTimer);
+
+  const s=getStat(KANJI[currentIndex].k);
+  const now=Date.now();
+
+  // Ручная отметка: пользователь уже уверенно знает этот кандзи.
+  // Не показываем его в автотренировке раньше чем через 30 дней.
+  s.reviews=Math.max(1,Number(s.reviews)||0);
+  s.correct=Math.max(1,Number(s.correct)||0);
+  s.streak=Math.max(5,Number(s.streak)||0);
+  s.difficulty=1;
+  s.intervalDays=30;
+  s.dueAt=now+30*86400000;
+  s.retryAtStep=0;
+  s.lastSeenAt=now;
+  s.lastSeenStep=sessionStep;
+  s.knownWell=true;
+  s.knownWellAt=now;
+
+  saveProgress();
+  status.innerHTML='<span class="good">✓ Отмечено как хорошо знакомый. Повтор через 30 дней.</span>';
+
+  if(trainingMode==='auto'){
+    autoAdvanceTimer=setTimeout(()=>loadNextAuto(),450);
+  }
+}
+
 async function loadNextAuto(){
   if(!KANJI.length) return;
   clearTimeout(autoAdvanceTimer);
@@ -445,6 +485,7 @@ function setTrainingMode(nextMode){
   manualPicker.classList.toggle('hidden',trainingMode!=='manual');
   manualNav.classList.toggle('hidden',trainingMode!=='manual');
   autoNextBtn.classList.toggle('hidden',trainingMode!=='auto');
+  knownBtn.classList.toggle('hidden',trainingMode!=='auto');
 }
 
 
@@ -672,6 +713,7 @@ document.getElementById('undoBtn').onclick=undo;
 hintBtn.onclick=flashHint;
 document.getElementById('prevBtn').onclick=()=>loadKanji(currentIndex-1);
 document.getElementById('nextBtn').onclick=()=>loadKanji(currentIndex+1);
+knownBtn.onclick=markCurrentKnownWell;
 autoNextBtn.onclick=()=>loadNextAuto();
 select.onchange=()=>loadKanji(+select.value);
 
