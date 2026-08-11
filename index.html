@@ -11,7 +11,10 @@ body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif
 .wrap{max-width:560px;margin:0 auto;padding:22px 16px 40px}
 h1{font-size:22px;margin:0 0 6px}.sub{color:var(--muted);font-size:14px;margin-bottom:16px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:20px;padding:18px;box-shadow:0 8px 30px rgba(0,0,0,.04)}
+.trainingbar{display:flex;gap:8px;justify-content:center;margin-bottom:10px;flex-wrap:wrap}
 .toprow{display:flex;justify-content:center;margin-bottom:10px}
+.hidden{display:none!important}
+.sessionstats{text-align:center;color:var(--muted);font-size:13px;margin:-2px 0 10px}
 select{font:inherit;border:1px solid var(--line);border-radius:999px;padding:9px 36px 9px 14px;background:#fff}
 .prompt{text-align:center;font-size:29px;font-weight:700;margin:3px 0 3px}
 .readings{text-align:center;color:var(--muted);font-size:14px;margin-bottom:12px;min-height:20px}
@@ -39,9 +42,14 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
   <h1>Kanji Trainer</h1>
   <div class="sub">Прототип с автоматической загрузкой черт KanjiVG</div>
   <div class="card">
-    <div class="toprow">
+    <div class="trainingbar">
+      <button id="autoTrainBtn" class="active">Автотренировка</button>
+      <button id="manualTrainBtn">Выбрать кандзи</button>
+    </div>
+    <div class="toprow hidden" id="manualPicker">
       <select id="kanjiSelect" aria-label="Выбрать кандзи"></select>
     </div>
+    <div class="sessionstats" id="sessionStats">Сегодня: 0 · Ошибок: 0 · Подсказок: 0</div>
     <div class="prompt" id="meaning">—</div>
     <div class="readings" id="readings">—</div>
 
@@ -70,12 +78,15 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
     </div>
 
     <div class="nav">
-      <button id="prevBtn">← Предыдущий</button>
-      <button id="nextBtn">Следующий →</button>
+      <button id="autoNextBtn">Другой кандзи →</button>
+      <span id="manualNav" class="hidden">
+        <button id="prevBtn">← Предыдущий</button>
+        <button id="nextBtn">Следующий →</button>
+      </span>
     </div>
 
     <div class="note">
-      Кандзи, значения и чтения загружаются из нашей Google-таблицы через Google Visualization API. Траектории письма приложение автоматически получает из KanjiVG. После успешной проверки зелёная пользовательская линия заменяется точной эталонной чертой, поэтому погрешности не накапливаются.
+      В режиме «Автотренировка» приложение само выбирает следующий кандзи. Ошибки и подсказки повышают его приоритет, а кандзи, которые пишутся уверенно, постепенно уходят на более длинные интервалы. Прогресс сохраняется в браузере этого устройства. Ручной выбор остаётся отдельным режимом.
     </div>
   </div>
 </div>
@@ -190,8 +201,151 @@ const refsGroup=document.getElementById('refs');
 const drawn=document.getElementById('drawn');
 const status=document.getElementById('status');
 const progress=document.getElementById('progress');
+const autoTrainBtn=document.getElementById('autoTrainBtn');
+const manualTrainBtn=document.getElementById('manualTrainBtn');
+const manualPicker=document.getElementById('manualPicker');
+const manualNav=document.getElementById('manualNav');
+const autoNextBtn=document.getElementById('autoNextBtn');
+const sessionStats=document.getElementById('sessionStats');
 
 let refs=[], mode='test', accepted=[], current=[], drawing=false, pointerId=null, currentIndex=0;
+let trainingMode='auto';
+let attemptErrors=0, attemptHints=0, attemptCompleted=false;
+let sessionStep=0, sessionReviews=0, sessionErrors=0, sessionHints=0;
+let autoAdvanceTimer=null;
+
+const PROGRESS_KEY='kanjiTrainerProgressV1';
+let learningProgress={};
+
+function loadProgress(){
+  try{
+    learningProgress=JSON.parse(localStorage.getItem(PROGRESS_KEY)||'{}') || {};
+  }catch(e){
+    learningProgress={};
+  }
+}
+function saveProgress(){
+  try{ localStorage.setItem(PROGRESS_KEY, JSON.stringify(learningProgress)); }catch(e){}
+}
+function getStat(k){
+  if(!learningProgress[k]){
+    learningProgress[k]={
+      reviews:0, correct:0, errors:0, hints:0, streak:0,
+      intervalDays:0, dueAt:0, difficulty:3,
+      retryAtStep:0, lastSeenStep:-999, lastSeenAt:0
+    };
+  }
+  return learningProgress[k];
+}
+function updateSessionStats(){
+  sessionStats.textContent=`Сегодня: ${sessionReviews} · Ошибок: ${sessionErrors} · Подсказок: ${sessionHints}`;
+}
+function scheduleIntervalDays(streak){
+  if(streak<=1) return 1;
+  if(streak===2) return 3;
+  if(streak===3) return 7;
+  if(streak===4) return 14;
+  if(streak===5) return 30;
+  return 60;
+}
+function recordCompletedReview(){
+  if(attemptCompleted || mode!=='test' || !KANJI[currentIndex]) return;
+  attemptCompleted=true;
+
+  const k=KANJI[currentIndex].k;
+  const s=getStat(k);
+  const now=Date.now();
+
+  s.reviews++;
+  s.correct++;
+  s.errors += attemptErrors;
+  s.hints += attemptHints;
+  s.lastSeenAt=now;
+  s.lastSeenStep=sessionStep;
+
+  if(attemptErrors===0 && attemptHints===0){
+    s.streak++;
+    s.difficulty=Math.max(1, (s.difficulty||3)-0.35);
+    s.intervalDays=scheduleIntervalDays(s.streak);
+    s.dueAt=now+s.intervalDays*86400000;
+    s.retryAtStep=0;
+  }else if(attemptHints===0 && attemptErrors<=1){
+    s.streak=0;
+    s.difficulty=Math.min(8, (s.difficulty||3)+0.35);
+    s.intervalDays=1;
+    s.dueAt=now+86400000;
+    s.retryAtStep=sessionStep+8;
+  }else{
+    s.streak=0;
+    s.difficulty=Math.min(10, (s.difficulty||3)+0.9+Math.min(1.5,attemptErrors*0.15));
+    s.intervalDays=0.5;
+    s.dueAt=now+12*3600000;
+    s.retryAtStep=sessionStep+3;
+  }
+
+  sessionReviews++;
+  updateSessionStats();
+  saveProgress();
+}
+function weightedChoice(items){
+  const total=items.reduce((a,x)=>a+x.weight,0);
+  if(total<=0) return items[Math.floor(Math.random()*items.length)]?.index ?? 0;
+  let r=Math.random()*total;
+  for(const x of items){
+    r-=x.weight;
+    if(r<=0) return x.index;
+  }
+  return items.at(-1)?.index ?? 0;
+}
+function chooseNextAutoIndex(){
+  if(!KANJI.length) return 0;
+  const now=Date.now();
+  const candidates=[];
+
+  KANJI.forEach((item,index)=>{
+    if(index===currentIndex && KANJI.length>1) return;
+    const s=getStat(item.k);
+    let weight=1;
+
+    if(!s.reviews){
+      weight=4.5; // ещё не проверялся в приложении
+    }else if(s.retryAtStep && sessionStep>=s.retryAtStep){
+      weight=13 + (s.difficulty||3);
+    }else if((s.dueAt||0)<=now){
+      weight=3 + (s.difficulty||3)*1.8;
+    }else{
+      // Уже уверенные кандзи почти не мешают новым/проблемным,
+      // но не исчезают навсегда.
+      weight=0.18 + (s.difficulty||3)*0.08;
+    }
+
+    const stepsSince=sessionStep-(s.lastSeenStep??-999);
+    if(stepsSince<=2 && !(s.retryAtStep && sessionStep>=s.retryAtStep)){
+      weight*=0.06;
+    }else if(stepsSince<=5){
+      weight*=0.35;
+    }
+
+    candidates.push({index,weight});
+  });
+
+  return weightedChoice(candidates);
+}
+async function loadNextAuto(){
+  if(!KANJI.length) return;
+  clearTimeout(autoAdvanceTimer);
+  sessionStep++;
+  const next=chooseNextAutoIndex();
+  await loadKanji(next);
+}
+function setTrainingMode(nextMode){
+  trainingMode=nextMode;
+  autoTrainBtn.classList.toggle('active',trainingMode==='auto');
+  manualTrainBtn.classList.toggle('active',trainingMode==='manual');
+  manualPicker.classList.toggle('hidden',trainingMode!=='manual');
+  manualNav.classList.toggle('hidden',trainingMode!=='manual');
+  autoNextBtn.classList.toggle('hidden',trainingMode!=='auto');
+}
 
 
 function hexFile(ch){
@@ -203,9 +357,12 @@ async function loadKanji(i){
   const item=KANJI[currentIndex];
   meaning.textContent=item.meaning;
   readings.textContent=`${item.on || '—'}　／　${item.kun || '—'}`;
-  status.textContent=`Загружаю ${item.k}…`;
+  status.textContent='Загружаю задание…';
   pad.classList.add('loading');
-  accepted=[]; current=[]; drawn.innerHTML=''; refsGroup.innerHTML=''; refs=[]; update();
+  accepted=[]; current=[]; drawn.innerHTML=''; refsGroup.innerHTML=''; refs=[];
+  attemptErrors=0; attemptHints=0; attemptCompleted=false;
+  clearTimeout(autoAdvanceTimer);
+  update();
 
   const url=`https://raw.githubusercontent.com/KanjiVG/kanjivg/master/kanji/${hexFile(item.k)}`;
   try{
@@ -313,7 +470,17 @@ function update(){
 }
 function clearAll(){accepted=[];current=[];drawn.innerHTML='';update()}
 function undo(){if(!accepted.length)return;accepted.pop();update()}
-function flashHint(){if(accepted.length>=refs.length)return;const p=refs[accepted.length];p.classList.add('show');setTimeout(()=>{if(mode==='test')p.classList.remove('show')},900)}
+function flashHint(){
+  if(accepted.length>=refs.length)return;
+  if(mode==='test'){
+    attemptHints++;
+    sessionHints++;
+    updateSessionStats();
+  }
+  const p=refs[accepted.length];
+  p.classList.add('show');
+  setTimeout(()=>{if(mode==='test')p.classList.remove('show')},900)
+}
 function evaluateFinishedStroke(){
   if(!refs.length||accepted.length>=refs.length)return;
   const temp=document.getElementById('tempStroke');if(temp)temp.remove();
@@ -334,8 +501,19 @@ function evaluateFinishedStroke(){
     setTimeout(()=>{
       userPath.remove();
       update();
+      if(accepted.length===refs.length){
+        recordCompletedReview();
+        if(trainingMode==='auto'){
+          autoAdvanceTimer=setTimeout(()=>loadNextAuto(),1000);
+        }
+      }
     },330);
   }else{
+    if(mode==='test'){
+      attemptErrors++;
+      sessionErrors++;
+      updateSessionStats();
+    }
     const bad=addPath(current,'userStroke bad');status.innerHTML=`<span class="badText">Не засчитано: ${result.reason}</span>`;
     refs[accepted.length].classList.add('show');
     setTimeout(()=>{bad.remove();if(mode==='test')refs[accepted.length]?.classList.remove('show');update()},800)
@@ -378,15 +556,29 @@ document.getElementById('undoBtn').onclick=undo;
 document.getElementById('hintBtn').onclick=flashHint;
 document.getElementById('prevBtn').onclick=()=>loadKanji(currentIndex-1);
 document.getElementById('nextBtn').onclick=()=>loadKanji(currentIndex+1);
+autoNextBtn.onclick=()=>loadNextAuto();
 select.onchange=()=>loadKanji(+select.value);
+
+autoTrainBtn.onclick=()=>{
+  setTrainingMode('auto');
+  loadNextAuto();
+};
+manualTrainBtn.onclick=()=>{
+  setTrainingMode('manual');
+  clearTimeout(autoAdvanceTimer);
+};
 
 const modeButtons={learn:document.getElementById('learnBtn'),repeat:document.getElementById('repeatBtn'),test:document.getElementById('testBtn')};
 Object.entries(modeButtons).forEach(([m,b])=>b.onclick=()=>{mode=m;Object.values(modeButtons).forEach(x=>x.classList.remove('active'));b.classList.add('active');update()});
 
 (async()=>{
   try{
+    loadProgress();
     await loadSheetData();
-    await loadKanji(0);
+    setTrainingMode('auto');
+    sessionStep=1;
+    await loadKanji(chooseNextAutoIndex());
+    updateSessionStats();
     document.querySelector('.sub').textContent=`Загружено активных кандзи: ${KANJI.length}`;
   }catch(err){
     console.error(err);
