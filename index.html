@@ -235,6 +235,7 @@ let autoAdvanceTimer=null;
 let guideTimer=null;
 
 const PROGRESS_KEY='kanjiTrainerProgressV1';
+const COUNTERS_KEY='kanjiTrainerCountersV1';
 let learningProgress={};
 
 function loadProgress(){
@@ -243,9 +244,24 @@ function loadProgress(){
   }catch(e){
     learningProgress={};
   }
+  try{
+    const c=JSON.parse(localStorage.getItem(COUNTERS_KEY)||'{}') || {};
+    sessionReviews=Number(c.reviews)||0;
+    sessionErrors=Number(c.errors)||0;
+    sessionHints=Number(c.hints)||0;
+  }catch(e){
+    sessionReviews=0; sessionErrors=0; sessionHints=0;
+  }
 }
 function saveProgress(){
-  try{ localStorage.setItem(PROGRESS_KEY, JSON.stringify(learningProgress)); }catch(e){}
+  try{
+    localStorage.setItem(PROGRESS_KEY, JSON.stringify(learningProgress));
+    localStorage.setItem(COUNTERS_KEY, JSON.stringify({
+      reviews:sessionReviews,
+      errors:sessionErrors,
+      hints:sessionHints
+    }));
+  }catch(e){}
 }
 
 function exportProgress(){
@@ -253,7 +269,12 @@ function exportProgress(){
     app:'Kanji Trainer',
     version:1,
     exportedAt:new Date().toISOString(),
-    progress:learningProgress
+    progress:learningProgress,
+    counters:{
+      reviews:sessionReviews,
+      errors:sessionErrors,
+      hints:sessionHints
+    }
   };
   const blob=new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
   const url=URL.createObjectURL(blob);
@@ -278,7 +299,20 @@ function importProgress(file){
         throw new Error('Неверный формат файла');
       }
       learningProgress=incoming;
+      const c=parsed?.counters;
+      if(c && typeof c==='object'){
+        sessionReviews=Number(c.reviews)||0;
+        sessionErrors=Number(c.errors)||0;
+        sessionHints=Number(c.hints)||0;
+      }else{
+        // Старые резервные копии не содержали видимые счётчики.
+        // Восстанавливаем их из накопленной статистики по кандзи.
+        sessionReviews=Object.values(learningProgress).reduce((n,s)=>n+(Number(s?.reviews)||0),0);
+        sessionErrors=Object.values(learningProgress).reduce((n,s)=>n+(Number(s?.errors)||0),0);
+        sessionHints=Object.values(learningProgress).reduce((n,s)=>n+(Number(s?.hints)||0),0);
+      }
       saveProgress();
+      updateSessionStats();
       alert('Прогресс восстановлен.');
     }catch(e){
       alert('Не удалось импортировать прогресс: '+e.message);
