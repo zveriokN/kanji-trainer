@@ -124,7 +124,12 @@ const SHEET_GID = '743630087';
 let KANJI = [];
 
 function normHeader(s){
-  return String(s||'').trim().toLowerCase().replace(/\s+/g,'');
+  return String(s||'')
+    .replace(/﻿/g,'')
+    .replace(/ /g,' ')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_\-–—:;,.()]+/g,'');
 }
 
 function isActiveValue(v){
@@ -182,7 +187,8 @@ async function loadSheetData(){
   const cMeaning=findCol(['значение','meaning','перевод']);
   const cOn=findCol(['音読み','onyomi','on']);
   const cKun=findCol(['訓読み','kunyomi','kun']);
-  const cExamples=findCol(['примеры','examples','частыеслова','слова']);
+  let cExamples=findCol(['примеры','examples','частыеслова','слова']);
+  if(cExamples<0 && table.cols.length>5) cExamples=5; // F = Примеры
   const cActive=findCol(['активно','active']);
 
   if(cKanji<0) throw new Error('Не найден столбец Kanji');
@@ -209,6 +215,9 @@ async function loadSheetData(){
   });
 
   if(!KANJI.length) throw new Error('В таблице нет активных кандзи');
+
+  console.log('Google Sheets columns:', headers, 'Примеры column:', cExamples,
+              'Sample examples:', KANJI[0]?.examples || '(empty)');
 
   select.innerHTML='';
   KANJI.forEach((x,i)=>{
@@ -774,7 +783,10 @@ Object.entries(modeButtons).forEach(([m,b])=>b.onclick=()=>{
   Object.values(modeButtons).forEach(x=>x.classList.remove('active'));
   b.classList.add('active');
   clearTimeout(guideTimer); guide.innerHTML='';
-  clearAll(); update();
+  clearAll();
+  if(mode==='learn' || mode==='repeat') showExamples();
+  else hideExamples();
+  update();
 });
 
 
