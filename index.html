@@ -200,6 +200,7 @@ async function loadSheetData(){
     meaning:val(row,cMeaning),
     on:val(row,cOn),
     kun:val(row,cKun),
+    examples:cExamples>=0 ? val(row,cExamples) : '',
     active:cActive>=0 ? isActiveValue(val(row,cActive)) : true
   })).filter(x=>{
     if(!x.k || !x.active || seen.has(x.k)) return false;
