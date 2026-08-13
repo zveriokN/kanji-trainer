@@ -34,14 +34,15 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
 .userStroke.bad{stroke:var(--bad)}.userStroke.ok{stroke:var(--ok)}
 .snapStroke{fill:none;stroke:var(--ok);stroke-width:4;stroke-linecap:round;stroke-linejoin:round;opacity:1;transition:opacity .10s ease}
 .snapStroke.fade{opacity:0}
-.status{text-align:center;min-height:48px;padding-top:12px;font-size:15px}.good{color:var(--ok)}.badText{color:var(--bad)}
+.status{text-align:center;min-height:18px;padding-top:6px;font-size:15px}.good{color:var(--ok)}.badText{color:var(--bad)}
 .progress{text-align:center;color:var(--muted);font-size:14px;margin-bottom:12px}
 .examplesBox{margin:12px auto 0;max-width:420px;border:1px solid var(--line);border-radius:14px;padding:12px 14px;background:#faf9f6}
 .examplesBox.hidden{display:none}
 .examplesTitle{font-size:13px;color:var(--muted);margin-bottom:7px}
 .examplesList{display:flex;flex-direction:column;gap:5px;font-size:15px;line-height:1.35}
 .note{margin-top:14px;color:var(--muted);font-size:13px;line-height:1.45}
-.backupbar{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:14px}
+.backupbar{display:flex;gap:7px;justify-content:center;flex-wrap:wrap;margin-top:12px}
+.backupBtn{padding:6px 10px;font-size:12px;color:var(--muted);border-radius:999px}
 .fileInput{display:none}
 .loading{opacity:.55}
 </style>
@@ -92,7 +93,6 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
     </div>
 
     <div class="controls">
-      <button id="undoBtn">Отменить черту</button>
       <button id="clearBtn">Очистить</button>
       <button id="hintBtn">Подсказка</button>
     </div>
@@ -107,8 +107,8 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
     </div>
 
     <div class="backupbar">
-      <button id="exportBtn">Экспорт прогресса</button>
-      <button id="importBtn">Импорт прогресса</button>
+      <button id="exportBtn" class="backupBtn">Экспорт прогресса</button>
+      <button id="importBtn" class="backupBtn">Импорт прогресса</button>
       <input id="importFile" class="fileInput" type="file" accept="application/json,.json">
     </div>
 
@@ -552,7 +552,7 @@ async function loadKanji(i){
       refsGroup.appendChild(p);
     }
     refs=[...refsGroup.querySelectorAll('.ref')];
-    status.textContent=`Сейчас ожидается черта 1 из ${refs.length}.`;
+    status.textContent='';
     update();
   }catch(err){
     console.error(err);
@@ -664,7 +664,7 @@ function update(){
     if(accepted.length < refs.length) hideExamples();
   }
   if(refs.length&&accepted.length===refs.length) status.innerHTML='<span class="good">✓ Написано правильно.</span>';
-  else if(refs.length) status.textContent=`Сейчас ожидается черта ${accepted.length+1} из ${refs.length}.`;
+  else if(refs.length) status.textContent='';
 }
 function clearAll(){accepted=[];current=[];drawn.innerHTML='';update()}
 function undo(){if(!accepted.length)return;accepted.pop();update()}
@@ -760,7 +760,6 @@ if(!window.PointerEvent){
 }
 
 document.getElementById('clearBtn').onclick=clearAll;
-document.getElementById('undoBtn').onclick=undo;
 hintBtn.onclick=flashHint;
 document.getElementById('prevBtn').onclick=()=>loadKanji(currentIndex-1);
 document.getElementById('nextBtn').onclick=()=>loadKanji(currentIndex+1);
