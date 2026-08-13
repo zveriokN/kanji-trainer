@@ -36,6 +36,10 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
 .snapStroke.fade{opacity:0}
 .status{text-align:center;min-height:48px;padding-top:12px;font-size:15px}.good{color:var(--ok)}.badText{color:var(--bad)}
 .progress{text-align:center;color:var(--muted);font-size:14px;margin-bottom:12px}
+.examplesBox{margin:12px auto 0;max-width:420px;border:1px solid var(--line);border-radius:14px;padding:12px 14px;background:#faf9f6}
+.examplesBox.hidden{display:none}
+.examplesTitle{font-size:13px;color:var(--muted);margin-bottom:7px}
+.examplesList{display:flex;flex-direction:column;gap:5px;font-size:15px;line-height:1.35}
 .note{margin-top:14px;color:var(--muted);font-size:13px;line-height:1.45}
 .backupbar{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:14px}
 .fileInput{display:none}
@@ -82,6 +86,11 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
     <div class="status" id="status">Загрузка…</div>
     <div class="progress" id="progress">0 / 0</div>
 
+    <div id="examplesBox" class="examplesBox hidden">
+      <div class="examplesTitle">Частые слова</div>
+      <div id="examplesList" class="examplesList"></div>
+    </div>
+
     <div class="controls">
       <button id="undoBtn">Отменить черту</button>
       <button id="clearBtn">Очистить</button>
@@ -104,7 +113,7 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
     </div>
 
     <div class="note">
-      «Учить» — весь образец виден, а направление следующей черты показывается анимацией. «Повторять» — образец скрыт, но доступна подсказка следующей черты. «Проверка» — чистое поле; ошибки и подсказки учитываются алгоритмом автоповторения. Прогресс сохраняется в браузере этого устройства. «Знаю хорошо» убирает текущий кандзи из автотренировки на 30 дней.
+      «Учить» — весь образец виден, а направление следующей черты показывается анимацией. «Повторять» — образец скрыт, но доступна подсказка следующей черты. «Проверка» — чистое поле; ошибки и подсказки учитываются алгоритмом автоповторения. Прогресс сохраняется в браузере этого устройства. «Знаю хорошо» убирает текущий кандзи из автотренировки на 30 дней. Примеры слов показываются только после полностью правильного написания.
     </div>
   </div>
 </div>
@@ -173,6 +182,7 @@ async function loadSheetData(){
   const cMeaning=findCol(['значение','meaning','перевод']);
   const cOn=findCol(['音読み','onyomi','on']);
   const cKun=findCol(['訓読み','kunyomi','kun']);
+  const cExamples=findCol(['примеры','examples','частыеслова','слова']);
   const cActive=findCol(['активно','active']);
 
   if(cKanji<0) throw new Error('Не найден столбец Kanji');
@@ -221,6 +231,8 @@ const guide=document.getElementById('guide');
 const modeHelp=document.getElementById('modeHelp');
 const status=document.getElementById('status');
 const progress=document.getElementById('progress');
+const examplesBox=document.getElementById('examplesBox');
+const examplesList=document.getElementById('examplesList');
 const autoTrainBtn=document.getElementById('autoTrainBtn');
 const manualTrainBtn=document.getElementById('manualTrainBtn');
 const manualPicker=document.getElementById('manualPicker');
@@ -445,6 +457,7 @@ function chooseNextAutoIndex(){
 async function markCurrentKnownWell(){
   if(!KANJI[currentIndex]) return;
   clearTimeout(autoAdvanceTimer);
+  hideExamples();
 
   const s=getStat(KANJI[currentIndex].k);
   const now=Date.now();
@@ -535,6 +548,28 @@ async function loadKanji(i){
   }finally{
     pad.classList.remove('loading');
   }
+}
+
+
+function hideExamples(){
+  examplesList.innerHTML='';
+  examplesBox.classList.add('hidden');
+}
+
+function showExamples(){
+  const raw=KANJI[currentIndex]?.examples || '';
+  if(!raw){
+    hideExamples();
+    return;
+  }
+  examplesList.innerHTML='';
+  const items=raw.split(/\s*\|\s*|\n+/).map(x=>x.trim()).filter(Boolean);
+  items.forEach(text=>{
+    const row=document.createElement('div');
+    row.textContent=text;
+    examplesList.appendChild(row);
+  });
+  examplesBox.classList.toggle('hidden', items.length===0);
 }
 
 function svgPoint(evt){
@@ -659,9 +694,10 @@ function evaluateFinishedStroke(){
       userPath.remove();
       update();
       if(accepted.length===refs.length){
+        showExamples();
         recordCompletedReview();
         if(trainingMode==='auto'){
-          autoAdvanceTimer=setTimeout(()=>loadNextAuto(),1000);
+          autoAdvanceTimer=setTimeout(()=>loadNextAuto(),2200);
         }
       }
     },140);
