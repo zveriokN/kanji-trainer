@@ -832,7 +832,10 @@ function evaluateFinishedStroke(){
       if(accepted.length===refs.length){
         showExamples();
         recordCompletedReview();
-        if(trainingMode==='auto'){
+        // В режиме «Проверка» после правильного написания остаёмся
+        // на текущем кандзи, чтобы можно было спокойно прочитать частые слова.
+        // Переход — только по кнопке «Другой кандзи».
+        if(trainingMode==='auto' && mode!=='test'){
           autoAdvanceTimer=setTimeout(()=>loadNextAuto(),2200);
         }
       }
