@@ -113,7 +113,7 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
     </div>
 
     <div class="note">
-      «Учить» — весь образец виден, а направление следующей черты показывается анимацией. «Повторять» — образец скрыт, но доступна подсказка следующей черты. «Проверка» — чистое поле; ошибки и подсказки учитываются алгоритмом автоповторения. Прогресс сохраняется в браузере этого устройства. «Знаю хорошо» убирает текущий кандзи из автотренировки на 30 дней. Примеры слов показываются только после полностью правильного написания.
+      «Учить» — весь образец виден, а направление следующей черты показывается анимацией. «Повторять» — образец скрыт, но доступна подсказка следующей черты. «Проверка» — чистое поле; ошибки и подсказки учитываются алгоритмом автоповторения. Прогресс сохраняется в браузере этого устройства. «Знаю хорошо» убирает текущий кандзи из автотренировки на 30 дней. В режимах «Учить» и «Повторять» частые слова видны сразу; в режиме «Проверка» они появляются только после полностью правильного написания.
     </div>
   </div>
 </div>
@@ -457,7 +457,7 @@ function chooseNextAutoIndex(){
 async function markCurrentKnownWell(){
   if(!KANJI[currentIndex]) return;
   clearTimeout(autoAdvanceTimer);
-  hideExamples();
+  if(mode==='test') hideExamples();
 
   const s=getStat(KANJI[currentIndex].k);
   const now=Date.now();
@@ -514,6 +514,8 @@ async function loadKanji(i){
   status.textContent='Загружаю задание…';
   pad.classList.add('loading');
   accepted=[]; current=[]; drawn.innerHTML=''; refsGroup.innerHTML=''; guide.innerHTML=''; refs=[];
+  if(mode==='learn' || mode==='repeat') showExamples();
+  else hideExamples();
   attemptErrors=0; attemptHints=0; attemptCompleted=false;
   clearTimeout(autoAdvanceTimer);
   update();
@@ -639,14 +641,17 @@ function update(){
     else if(mode==='learn') p.classList.add('show');
   });
   if(mode==='learn'){
-    modeHelp.textContent='Образец виден целиком. Нажми «Показать черту», чтобы увидеть направление следующего движения.';
+    modeHelp.textContent='Образец и частые слова видны. Нажми «Показать черту», чтобы увидеть направление следующего движения.';
     hintBtn.textContent='Показать черту';
+    showExamples();
   }else if(mode==='repeat'){
-    modeHelp.textContent='Кандзи скрыт. Если забыла следующую черту, можно посмотреть подсказку.';
+    modeHelp.textContent='Частые слова видны, но сам образец кандзи скрыт. Если забыла следующую черту, можно посмотреть подсказку.';
     hintBtn.textContent='Подсказка';
+    showExamples();
   }else{
-    modeHelp.textContent='Кандзи полностью скрыт. Ошибки и подсказки влияют на частоту будущих повторений.';
+    modeHelp.textContent='Кандзи и частые слова скрыты до правильного ответа. Ошибки и подсказки влияют на частоту будущих повторений.';
     hintBtn.textContent='Подсказка';
+    if(accepted.length < refs.length) hideExamples();
   }
   if(refs.length&&accepted.length===refs.length) status.innerHTML='<span class="good">✓ Написано правильно.</span>';
   else if(refs.length) status.textContent=`Сейчас ожидается черта ${accepted.length+1} из ${refs.length}.`;
