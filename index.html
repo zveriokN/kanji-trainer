@@ -130,6 +130,8 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
 </style>
 
   <link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#f6f4ef">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Kanji Trainer">
 </head>
@@ -203,6 +205,8 @@ button.active{background:#1f1f1f;color:#fff;border-color:#1f1f1f}
 <script>
 const SHEET_ID = '1At0tlk5iAhj_a2Hl05RRZ5ewRROXZd2BKBk0Avjdxdo';
 const SHEET_GID = '743630087';
+const OFFLINE_DATA_KEY='kanjiTrainerSheetCacheV1';
+let sheetLoadedFromCache=false;
 let KANJI = [];
 
 function normHeader(s){
@@ -253,11 +257,7 @@ function loadGoogleTableViaJSONP(){
   });
 }
 
-async function loadSheetData(){
-  status.textContent='Загружаю базу кандзи из Google Sheets…';
-  pad.classList.add('loading');
-
-  const table=await loadGoogleTableViaJSONP();
+function tableToKanji(table){
   if(!table || !Array.isArray(table.cols) || !Array.isArray(table.rows)){
     throw new Error('Неверный формат данных Google Sheets');
   }
@@ -270,7 +270,7 @@ async function loadSheetData(){
   const cOn=findCol(['音読み','onyomi','on']);
   const cKun=findCol(['訓読み','kunyomi','kun']);
   let cExamples=findCol(['примеры','examples','частыеслова','слова']);
-  if(cExamples<0 && table.cols.length>5) cExamples=5; // F = Примеры
+  if(cExamples<0 && table.cols.length>5) cExamples=5;
   const cActive=findCol(['активно','active']);
 
   if(cKanji<0) throw new Error('Не найден столбец Kanji');
@@ -283,7 +283,7 @@ async function loadSheetData(){
   };
 
   const seen=new Set();
-  KANJI = table.rows.map(row=>({
+  const data=table.rows.map(row=>({
     k:val(row,cKanji),
     meaning:val(row,cMeaning),
     on:val(row,cOn),
@@ -296,11 +296,12 @@ async function loadSheetData(){
     return true;
   });
 
-  if(!KANJI.length) throw new Error('В таблице нет активных кандзи');
+  if(!data.length) throw new Error('В таблице нет активных кандзи');
+  return data;
+}
 
-  console.log('Google Sheets columns:', headers, 'Примеры column:', cExamples,
-              'Sample examples:', KANJI[0]?.examples || '(empty)');
-
+function applyKanjiData(data){
+  KANJI=data;
   select.innerHTML='';
   KANJI.forEach((x,i)=>{
     const o=document.createElement('option');
@@ -308,10 +309,48 @@ async function loadSheetData(){
     o.textContent=x.meaning ? x.meaning : 'Без значения';
     select.appendChild(o);
   });
-
-  pad.classList.remove('loading');
 }
 
+function saveOfflineSheetCache(data){
+  try{
+    localStorage.setItem(OFFLINE_DATA_KEY,JSON.stringify({
+      savedAt:Date.now(),
+      data
+    }));
+  }catch(e){
+    console.warn('Не удалось сохранить офлайн-базу',e);
+  }
+}
+
+function loadOfflineSheetCache(){
+  try{
+    const cached=JSON.parse(localStorage.getItem(OFFLINE_DATA_KEY)||'null');
+    if(cached?.data?.length) return cached.data;
+  }catch(e){}
+  return null;
+}
+
+async function loadSheetData(){
+  status.textContent='Загружаю базу кандзи…';
+  pad.classList.add('loading');
+  sheetLoadedFromCache=false;
+
+  try{
+    if(!navigator.onLine) throw new Error('offline');
+    const table=await loadGoogleTableViaJSONP();
+    const data=tableToKanji(table);
+    applyKanjiData(data);
+    saveOfflineSheetCache(data);
+  }catch(err){
+    const cached=loadOfflineSheetCache();
+    if(!cached) throw err;
+    applyKanjiData(cached);
+    sheetLoadedFromCache=true;
+    console.log('Используется сохранённая офлайн-база');
+  }finally{
+    pad.classList.remove('loading');
+  }
+}
 const select=document.getElementById('kanjiSelect');
 const meaning=document.getElementById('meaning');
 const readings=document.getElementById('readings');
@@ -612,7 +651,7 @@ async function loadKanji(i){
   clearTimeout(autoAdvanceTimer);
   update();
 
-  const url=`https://raw.githubusercontent.com/KanjiVG/kanjivg/master/kanji/${hexFile(item.k)}`;
+  const url=kanjiSvgUrl(item);
   try{
     const res=await fetch(url,{cache:'force-cache'});
     if(!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -878,15 +917,44 @@ importFile.addEventListener('change',()=>{
   if(file) importProgress(file);
 });
 
+
+async function registerOfflineSupport(){
+  if(!('serviceWorker' in navigator)) return null;
+  try{
+    const reg=await navigator.serviceWorker.register('./sw.js',{scope:'./'});
+    await navigator.serviceWorker.ready;
+    return reg;
+  }catch(err){
+    console.warn('Service Worker не зарегистрирован',err);
+    return null;
+  }
+}
+
+function kanjiSvgUrl(item){
+  return `https://raw.githubusercontent.com/KanjiVG/kanjivg/master/kanji/${hexFile(item.k)}`;
+}
+
+async function requestKanjiPrecache(reg){
+  if(!reg?.active || !KANJI.length || !navigator.onLine) return;
+  reg.active.postMessage({
+    type:'PRECACHE_KANJI',
+    urls:KANJI.map(kanjiSvgUrl)
+  });
+}
+
 (async()=>{
   try{
     loadProgress();
+    const swReg=await registerOfflineSupport();
     await loadSheetData();
     setTrainingMode('auto');
     sessionStep=1;
     await loadKanji(chooseNextAutoIndex());
     updateSessionStats();
-    document.querySelector('.sub').textContent=`Загружено активных кандзи: ${KANJI.length}`;
+    document.querySelector('.sub').textContent=sheetLoadedFromCache
+      ? `Офлайн · сохранено кандзи: ${KANJI.length}`
+      : `Загружено активных кандзи: ${KANJI.length}`;
+    requestKanjiPrecache(swReg);
   }catch(err){
     console.error(err);
     pad.classList.remove('loading');
@@ -894,6 +962,15 @@ importFile.addEventListener('change',()=>{
     document.querySelector('.sub').textContent='Ошибка загрузки Google Sheets';
   }
 })();
+window.addEventListener('online',async()=>{
+  try{
+    await loadSheetData();
+    document.querySelector('.sub').textContent=`Загружено активных кандзи: ${KANJI.length}`;
+    const reg=await navigator.serviceWorker?.ready;
+    requestKanjiPrecache(reg);
+  }catch(e){}
+});
+
 </script>
 </body>
 </html>
